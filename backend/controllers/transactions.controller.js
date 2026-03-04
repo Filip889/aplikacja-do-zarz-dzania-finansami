@@ -60,23 +60,37 @@ exports.getTransactions = async (req, res) => {
 
 exports.getStats = async (req, res) => {
   const userId = req.user.id;
+  const { month } = req.query;
+
   try {
+    let filterQuery = "WHERE user_id = $1";
+    let params = [userId];
+
+    if (month) {
+      const [year, monthNum] = month.split('-');
+      const start = `${year}-${monthNum}-01`;
+      const end = new Date(year, monthNum, 0).toISOString().split('T')[0];
+      
+      params.push(start, end);
+      filterQuery += ` AND date >= $2 AND date <= $3`;
+    }
+
     const incomeRes = await pool.query(
-      "SELECT COALESCE(SUM(amount), 0) AS income FROM transactions WHERE user_id = $1 AND type = 'income'",
-      [userId]
+      `SELECT COALESCE(SUM(amount), 0) AS income FROM transactions ${filterQuery} AND type = 'income'`,
+      params
     );
     const expenseRes = await pool.query(
-      "SELECT COALESCE(SUM(amount), 0) AS expense FROM transactions WHERE user_id = $1 AND type = 'expense'",
-      [userId]
+      `SELECT COALESCE(SUM(amount), 0) AS expense FROM transactions ${filterQuery} AND type = 'expense'`,
+      params
     );
     const byCategoryRes = await pool.query(
-  `SELECT c.name, SUM(t.amount)::FLOAT AS value 
-   FROM transactions t 
-   JOIN categories c ON t.category_id = c.id 
-   WHERE t.user_id = $1 AND t.type = 'expense' 
-   GROUP BY c.name ORDER BY value DESC`,
-  [userId]
-);
+      `SELECT c.name, SUM(t.amount)::FLOAT AS value 
+       FROM transactions t 
+       JOIN categories c ON t.category_id = c.id 
+       ${filterQuery.replace('user_id', 't.user_id')} AND t.type = 'expense' 
+       GROUP BY c.name ORDER BY value DESC`,
+      params
+    );
 
     const income = Number(incomeRes.rows[0].income);
     const expense = Number(expenseRes.rows[0].expense);
